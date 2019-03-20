@@ -13,6 +13,7 @@ import copy
 # Load the DroneController class, which handles interactions with the drone, and the VideoProcessing class, which handles video display
 from drone_controller import BasicDroneController
 from diy_pid.msg import TargetCoord
+from diy_pid.msg import ColorHSV
 
 # Import Image OpenCV and Numpy
 import numpy as np 
@@ -35,7 +36,7 @@ from PySide import QtCore, QtGui
 from cv_bridge import CvBridge, CvBridgeError
 
 # Some Constants
-CONNECTION_CHECK_PERIOD = 250 #ms
+CONNECTION_CHECK_PERIOD = 50 #ms
 GUI_UPDATE_PERIOD = 20 #ms
 DETECT_RADIUS = 4 # the radius of the circle drawn when a tag is detected
 
@@ -52,7 +53,8 @@ class KeyMapping(object):
 	Takeoff          = QtCore.Qt.Key.Key_Y
 	Land             = QtCore.Qt.Key.Key_H
 	Emergency        = QtCore.Qt.Key.Key_Space
-	Tracking		 = QtCore.Qt.Key.Key_T
+	Tracking				 = QtCore.Qt.Key.Key_T
+	TakePicture			 = QtCore.Qt.Key.Key_X
 
 # Our controller definition, note that we extend the VideoProcessing class
 class KeyboardController(QtGui.QMainWindow):
@@ -85,7 +87,7 @@ class KeyboardController(QtGui.QMainWindow):
 		self.subVideo = rospy.Subscriber('/ardrone/image_raw',Image,self.ReceiveImage)
 		
 		# Holds the image frame received from the drone and later processed by the GUI
-		#self.image = None
+		self.image = None
 		self.cvImage = None
 		self.hsvImage = None
 		# Image Parameters
@@ -111,14 +113,18 @@ class KeyboardController(QtGui.QMainWindow):
 		self.imageLock = Lock()
 		# Color range
 		self.upper_green = np.array([70,255,255])
-		self.lower_green = np.array([55,170,170])
-		#self.lower_red1 = np.array([0,150,130])
-		#self.upper_red1 = np.array([10,255,255])
-		#self.lower_red2 = np.array([160,150,130])
-		#self.upper_red2 = np.array([180,255,255])
+		self.lower_green = np.array([55,150,150])
+		self.lower_red1 = np.array([0,180,100])
+		self.upper_red1 = np.array([10,255,255])
+		self.lower_red2 = np.array([160,180,100])
+		self.upper_red2 = np.array([180,255,255])
 		self.mask1 = None
 		self.mask2 = None
 		self.mask = None
+
+		self.h = 0
+		self.s = 0
+		self.v = 0
 
 		self.tags = []
 		self.tagLock = Lock()
@@ -151,17 +157,37 @@ class KeyboardController(QtGui.QMainWindow):
 		self.lastTargetY = 0
 		self.lastTargetSize = 0
 
-		self.subCoord = rospy.Subscriber('/target/coord',TargetCoord,self.RecieveCoord)
-    
-	def RecieveCoord(self,targetCoord):
-		if self.auto:
-			self.roll = (self.centerx - targetCoord.x)/100.0 + (targetCoord.x - self.lastTargetX)/100.0
+		self.subCoord = rospy.Subscriber('/target/coord',TargetCoord,self.PIDTracking)
+    # The tracking happens when the target coordinate is recieved. Here a PID control (without the integral part) is implemented
+	def PIDTracking(self,targetCoord):
+		if self.auto and self.connected:
+			distanceX = self.centerx - targetCoord.x
+			if (distanceX + 10) < 0:
+				self.roll = (distanceX + 10)/200.0 #+ (targetCoord.x - self.lastTargetX)/100.0
+			elif (distanceX - 10) > 0:
+				self.roll = (distanceX - 10)/200.0 #+ (targetCoord.x - self.lastTargetX)/100.0
+			else: self.roll = 0
 			self.lastTargetX = targetCoord.x
-			self.z_velocity = (self.centery - targetCoord.y)/100.0 + (self.lastTargetY - targetCoord.y)/100.0
+
+			distanceY = self.centery - targetCoord.y
+			if (distanceY + 10) < 0:
+				self.z_velocity = (distanceY + 10)/100.0 #+ (self.lastTargetY - targetCoord.y)/100.0
+			elif (distanceY - 10) > 0:
+				self.z_velocity = (distanceY - 10)/100.0 #+ (self.lastTargetY - targetCoord.y)/100.0
+			else: self.z_velocity = 0
 			self.lastTargetY = targetCoord.y
-			self.pitch = (1000 - targetCoord.z)/500.0 - (self.lastTargetSize - targetCoord.z)/500.0
+
+			distanceZ = 1000 - targetCoord.z
+			if (distanceZ + 200) < 0:
+				self.pitch = (distanceZ + 200)/500.0 #- (self.lastTargetSize - targetCoord.z)/500.0
+			elif (distanceZ - 200) > 0:
+				self.pitch = (distanceZ - 200)/500.0 #- (self.lastTargetSize - targetCoord.z)/500.0
+			else: self.pitch = 0
 			self.lastTargetSize = targetCoord.z
+			
 			controller.SetCommand(self.roll, self.pitch, self.yaw_velocity, self.z_velocity)
+		elif not self.connected:
+			controller.SetCommand(0,0,0,0)
 
 	# Called every CONNECTION_CHECK_PERIOD ms, if we haven't received anything since the last callback, will assume we are having network troubles and display a message in the status bar
 	def ConnectionCallback(self):
@@ -199,7 +225,7 @@ class KeyboardController(QtGui.QMainWindow):
 			self.imageBox.setPixmap(image)
 
 		# Update the status bar to show the current drone status & battery level
-		self.statusBar().showMessage(self.statusMessage if self.connected else self.DisconnectedMessage)
+		self.statusBar().showMessage(self.statusMessage)
 
 	def ReceiveImage(self,data):
 		# Indicate that new data has been received (thus we are connected)
@@ -208,6 +234,7 @@ class KeyboardController(QtGui.QMainWindow):
 		# We have some issues with locking between the GUI update thread and the ROS messaging thread due to the size of the image, so we need to lock the resources
 		self.imageLock.acquire()
 		try:
+			self.image = self.bridge.imgmsg_to_cv2(data, "bgr8")
 			self.cvImage = self.bridge.imgmsg_to_cv2(data, "bgr8")     # convert ros image to BGR openCV image
 			self.height, self.width, self.channel = self.cvImage.shape # get height and width of image
 			self.centerx = self.width/2								   # find the center of the image
@@ -216,14 +243,18 @@ class KeyboardController(QtGui.QMainWindow):
 			cv.rectangle(self.cvImage,(self.centerx - 10,self.centery - 10),(self.centerx + 10,self.centery + 10),(255,0,0),2)
 			# creat a mask that only shows red pixels
 			self.hsvImage = cv.cvtColor(self.cvImage, cv.COLOR_BGR2HSV)
-			self.mask1 = cv.inRange(self.hsvImage, self.lower_green, self.upper_green)
-			#self.mask2 = cv.inRange(self.hsvImage, self.lower_red2, self.upper_red2)
-			#self.mask = self.mask1 + self.mask2
+			self.hsvImage = cv.GaussianBlur(self.hsvImage,(11,11),0)
+			self.h, self.s, self.v = self.hsvImage[self.centerx][self.centery]
+			self.mask1 = cv.inRange(self.hsvImage, self.lower_red1, self.upper_red1)
+			#cv.erode(self.mask1,None,iterations=2)
+			#cv.dilate(self.mask1,None,iterations=2)
+			self.mask2 = cv.inRange(self.hsvImage, self.lower_red2, self.upper_red2)
+			self.mask = self.mask1 + self.mask2
 			# get the average (the center) of all red pixels coordinates
-			ys, xs = np.where(self.mask1 > 0)
+			ys, xs = np.where(self.mask > 0)
 			if xs.size > 5:
-				self.targetX = np.sum(xs)/xs.size
-				self.targetY = np.sum(ys)/ys.size
+				self.targetX = int(np.average(xs)) #+ np.random.normal(0,10))
+				self.targetY = int(np.average(ys)) #+ np.random.normal(0,10))
 				# draw a circle at the center of the target
 				cv.circle(self.cvImage, (self.targetX,self.targetY), 2, (255,255,255),0)
 				# draw a line that goes from center of the screen to the center of the target
@@ -233,23 +264,25 @@ class KeyboardController(QtGui.QMainWindow):
 				self.lowerBound = np.amax(ys)
 				self.leftBound = np.amin(xs)
 				self.rightBound = np.amax(xs)
-				self.targetSize = (self.lowerBound - self.upperBound)*(self.rightBound - self.leftBound)
+				self.targetSize = (self.lowerBound - self.upperBound)*(self.rightBound - self.leftBound) #+ np.random.normal(0,500)
 				cv.rectangle(self.cvImage,(self.leftBound,self.upperBound),(self.rightBound,self.lowerBound),(100,100,0),2)
-				# set target coordinate so it can be send by BasicDroneController (did not work, possibly has to do with class issues)
+				self.controller.SetCoord(self.targetX, self.targetY, self.targetSize, True)
 			else:
 				self.targetX = self.centerx
 				self.targetY = self.centery
-			controller.SetCoord(self.targetX, self.targetY, self.targetSize)
+				self.targetSize = 1000
+				self.controller.SetCoord(self.targetX, self.targetY, self.targetSize, False)
+				self.controller.SetColor(self.h, self.s, self.v)
 		finally:
 			self.imageLock.release()
 
 	def ReceiveNavdata(self,navdata):
 		# Indicate that new data has been received (thus we are connected)
-		self.communicationSinceTimer = True
+		#self.communicationSinceTimer = True
 
 		# Update the message to be displayed
 		msg = self.StatusMessages[navdata.state] if navdata.state in self.StatusMessages else self.UnknownMessage
-		self.statusMessage = '{} (Battery: {}%)'.format(msg,int(navdata.batteryPercent))
+		self.statusMessage = 'Connected:{}||{}||Battery:{}%||AutoTracking:{}'.format(self.connected,msg,int(navdata.batteryPercent),self.auto)
 
 		self.tagLock.acquire()
 		try:
@@ -259,20 +292,6 @@ class KeyboardController(QtGui.QMainWindow):
 				self.tags = []
 		finally:
 			self.tagLock.release()
-	
-	# Proportional and derivative control to track the target, called when 'T' is pressed
-	def autoTracking(self):
-		while self.auto:
-			self.roll = (self.centerx - self.targetX)/200.0 + (self.targetX - self.lastTargetX)/200.0
-			self.lastTargetX = copy.deepcopy(self.targetX)
-
-			self.z_velocity = (self.centery - self.targetY)/200.0 #+ (self.lastTargetY - self.targetY)/100.0
-			self.lastTargetY = copy.deepcopy(self.targetX)
-
-			self.pitch = (1000 - self.targetSize)/5000.0 - (self.lastTargetSize - self.targetSize)/100.0
-			self.lastTargetSize = copy.deepcopy(self.targetSize)
-
-			controller.SetCommand(self.roll, self.pitch, self.yaw_velocity, self.z_velocity)
 
 
 	# We add a keyboard handler to the VideoProcessing to react to keypresses
@@ -316,7 +335,11 @@ class KeyboardController(QtGui.QMainWindow):
 						self.roll = 0
 						self.yaw_velocity = 0 
 						self.z_velocity = 0
-					print 'auto tracking is', self.auto
+
+				elif key == KeyMapping.TakePicture:
+					print 'Take picture'
+					cv.imwrite('image.jpg',self.image)
+					print 'Picture taken'
 
 			# finally we set the command to be sent. The controller handles sending this at regular intervals
 			controller.SetCommand(self.roll, self.pitch, self.yaw_velocity, self.z_velocity)
@@ -358,7 +381,8 @@ class KeyboardController(QtGui.QMainWindow):
 if __name__=='__main__':
 	import sys
 	# Firstly we setup a ros node, so that we can communicate with the other packages
-	rospy.init_node('ardrone_keyboard_controller')
+	print('Running all_in_one')
+	rospy.init_node('Color_Tracking')
 
 	# Now we construct our Qt Application and associated controllers and windows
 	app = QtGui.QApplication(sys.argv)

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8)
-project(diy_pid)
+project(ardrone_color_tracking)
 
 find_package(catkin REQUIRED COMPONENTS
   message_generation
@@ -8,6 +8,8 @@ find_package(catkin REQUIRED COMPONENTS
 add_message_files(
   FILES
   TargetCoord.msg
+  ColorHSV.msg
+  TrainingData.msg
 )
 
 generate_messages(
@@ -19,7 +21,7 @@ catkin_package(CATKIN_DEPENDS message_runtime)
 #catkin_python_setup()
 
 
-install(PROGRAMS src/drone_controller.py  
+install(PROGRAMS src/drone_controller.py
 		 src/drone_status.py  
 		 src/drone_video_display.py  
 		 src/video_processing.py

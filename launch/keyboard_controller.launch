@@ -12,5 +12,5 @@
 	</node>
 	
 	<!-- Launches the keyboard controller -->
-	<node name="keyboard_controller" pkg="diy_pid" type="all_in_one.py" required="true"/>
+	<node name="Color_Tracking" pkg="diy_pid" type="all_in_one.py" required="true"/>
 </launch>

@@ -13,7 +13,7 @@ import copy
 # Load the DroneController class, which handles interactions with the drone, and the VideoProcessing class, which handles video display
 from drone_controller import BasicDroneController
 from video_processing import VideoProcessing
-from diy_pid.msg import TargetCoord
+from ardrone_color_tracking.msg import TargetCoord
 
 # Finally the GUI libraries
 from PySide import QtCore, QtGui
@@ -49,21 +49,26 @@ class KeyboardController(VideoProcessing):
 		self.lastTargetY = 0
 		self.lastTargetSize = 0
 
-		#self.subCoord = rospy.Subscriber('/target/coord',TargetCoord,self.RecieveCoord)
+		self.subCoord = rospy.Subscriber('/target/coord',TargetCoord,self.autoTracking)
 	
-	# Proportional and derivative control to track the target, called when 'T' is pressed
-	def autoTracking(self):
-		while self.auto:
-			self.roll = (self.centerx - self.targetX)/200.0 + (self.targetX - self.lastTargetX)/200.0
+	# Proportional (and derivative) control to track the target
+	def autoTracking(self,targetCoord):
+		if self.auto and self.connected and self.detection:
+			self.roll = (self.centerx - self.targetX)/200.0 #+ (self.targetX - self.lastTargetX)/200.0
 			self.lastTargetX = copy.deepcopy(self.targetX)
 
 			self.z_velocity = (self.centery - self.targetY)/200.0 #+ (self.lastTargetY - self.targetY)/100.0
 			self.lastTargetY = copy.deepcopy(self.targetX)
 
-			self.pitch = (1000 - self.targetSize)/5000.0 - (self.lastTargetSize - self.targetSize)/100.0
+			self.pitch = (1000 - self.targetSize)/1000.0 #- (self.lastTargetSize - self.targetSize)/100.0
 			self.lastTargetSize = copy.deepcopy(self.targetSize)
 
-			controller.SetCommand(self.roll, self.pitch, self.yaw_velocity, self.z_velocity)
+			self.controller.SetCommand(self.roll, self.pitch, self.yaw_velocity, self.z_velocity)
+		elif self.auto and self.connected and not self.detection:
+			self.controller.SetCommand(0,0,0,0)
+		elif not self.connected:
+			self.controller.SetCommand(0,0,0,0)
+		self.controller.SetTrainingData(self.targetX,self.targetY,self.targetSize,self.detection,self.roll,self.pitch,self.yaw_velocity,self.z_velocity)
 
 
 # We add a keyboard handler to the VideoProcessing to react to keypresses
@@ -71,14 +76,14 @@ class KeyboardController(VideoProcessing):
 		key = event.key()
 
 		# If we have constructed the drone controller and the key is not generated from an auto-repeating key
-		if controller is not None and not event.isAutoRepeat():
+		if self.controller is not None and not event.isAutoRepeat():
 			# Handle the important cases first!
 			if key == KeyMapping.Emergency:
-				controller.SendEmergency()
+				self.controller.SendEmergency()
 			elif key == KeyMapping.Takeoff:
-				controller.SendTakeoff()
+				self.controller.SendTakeoff()
 			elif key == KeyMapping.Land:
-				controller.SendLand()
+				self.controller.SendLand()
 			else:
 				# Now we handle moving, notice that this section is the opposite (+=) of the keyrelease section
 				if key == KeyMapping.YawLeft:
@@ -102,18 +107,21 @@ class KeyboardController(VideoProcessing):
 					self.z_velocity += -1.5
 				elif key == KeyMapping.Tracking:
 					self.auto = not self.auto
-					if self.auto:
-						self.autoTracking()
+					if self.auto is False:
+						self.pitch = 0
+						self.roll = 0
+						self.yaw_velocity = 0
+						self.z_velocity = 0
 
 			# finally we set the command to be sent. The controller handles sending this at regular intervals
-			controller.SetCommand(self.roll, self.pitch, self.yaw_velocity, self.z_velocity)
+			self.controller.SetCommand(self.roll, self.pitch, self.yaw_velocity, self.z_velocity)
 
 
 	def keyReleaseEvent(self,event):
 		key = event.key()
 
 		# If we have constructed the drone controller and the key is not generated from an auto-repeating key
-		if controller is not None and not event.isAutoRepeat():
+		if self.controller is not None and not event.isAutoRepeat():
 			# Note that we don't handle the release of emergency/takeoff/landing keys here, there is no need.
 			# Now we handle moving, notice that this section is the opposite (-=) of the keypress section
 			if key == KeyMapping.YawLeft:
@@ -137,7 +145,7 @@ class KeyboardController(VideoProcessing):
 				self.z_velocity -= -1.5
 
 			# finally we set the command to be sent. The controller handles sending this at regular intervals
-			controller.SetCommand(self.roll, self.pitch, self.yaw_velocity, self.z_velocity)
+			self.controller.SetCommand(self.roll, self.pitch, self.yaw_velocity, self.z_velocity)
 
 
 
@@ -149,7 +157,6 @@ if __name__=='__main__':
 
 	# Now we construct our Qt Application and associated controllers and windows
 	app = QtGui.QApplication(sys.argv)
-	controller = BasicDroneController()
 	display = KeyboardController()
 	display.show()
 

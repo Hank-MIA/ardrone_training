@@ -34,7 +34,7 @@ from cv_bridge import CvBridge, CvBridgeError
 
 
 # Some Constants
-CONNECTION_CHECK_PERIOD = 250 #ms
+CONNECTION_CHECK_PERIOD = 50 #ms
 GUI_UPDATE_PERIOD = 20 #ms
 DETECT_RADIUS = 4 # the radius of the circle drawn when a tag is detected
 
@@ -64,11 +64,14 @@ class VideoProcessing(QtGui.QMainWindow):
 		self.imageBox = QtGui.QLabel(self)
 		self.setCentralWidget(self.imageBox)
 
+		# Create BasicDroneController object 
+		self.controller = BasicDroneController()
+
 		# Subscribe to the /ardrone/navdata topic, of message type navdata, and call self.ReceiveNavdata when a message is received
 		self.subNavdata = rospy.Subscriber('/ardrone/navdata',Navdata,self.ReceiveNavdata) 
 		
 		# Subscribe to the drone's video feed, calling self.ReceiveImage when a new frame is received
-		self.subVideo   = rospy.Subscriber('/ardrone/image_raw',Image,self.ReceiveImage)
+		self.subVideo = rospy.Subscriber('/ardrone/image_raw',Image,self.ImageProcessing)
 		
 		# Holds the image frame received from the drone and later processed by the GUI
 		#self.image = None
@@ -89,6 +92,8 @@ class VideoProcessing(QtGui.QMainWindow):
 		self.leftBound=0
 		self.rightBound=0
 		self.targetSize=0
+		# Target Detection
+		self.detection = False
 
 		self.bridge = CvBridge()
 		self.imageLock = Lock()
@@ -157,10 +162,10 @@ class VideoProcessing(QtGui.QMainWindow):
 			self.resize(image.width(),image.height())
 			self.imageBox.setPixmap(image)
 
-		# Update the status bar to show the current drone status & battery level
-		self.statusBar().showMessage(self.statusMessage if self.connected else self.DisconnectedMessage)
+		# Update the status bar to show the current drone status, battery level, and connection 
+		self.statusBar().showMessage(self.statusMessage)
 
-	def ReceiveImage(self,data):
+	def ImageProcessing(self,data):
 		# Indicate that new data has been received (thus we are connected)
 		self.communicationSinceTimer = True
 
@@ -180,9 +185,9 @@ class VideoProcessing(QtGui.QMainWindow):
 			self.mask = self.mask1 + self.mask2
 			# get the average (the center) of all red pixels coordinates
 			ys, xs = np.where(self.mask > 0)
-			if xs.size is not 0:
-				self.targetX = np.sum(xs)/xs.size
-				self.targetY = np.sum(ys)/ys.size
+			if xs.size > 10:
+				self.targetX = int(np.average(xs))
+				self.targetY = int(np.average(ys))
 				# draw a circle at the center of the target
 				cv.circle(self.cvImage, (self.targetX,self.targetY), 2, (255,255,255),0)
 				# draw a line that goes from center of the screen to the center of the target
@@ -194,18 +199,20 @@ class VideoProcessing(QtGui.QMainWindow):
 				self.rightBound = np.amax(xs)
 				self.targetSize = (self.lowerBound - self.upperBound)*(self.rightBound - self.leftBound)
 				cv.rectangle(self.cvImage,(self.leftBound,self.upperBound),(self.rightBound,self.lowerBound),(100,100,0),2)
-				# set target coordinate so it can be send by BasicDroneController (did not work, possibly has to do with class issues)
-				#controller.SetCoord(targetX, targetY)
+				self.detection = True
+			else:
+				self.targetX = self.centerx
+				self.targetY = self.centery
+				self.targetSize = 1000
+				self.detection = False
+			self.controller.SetCoord(self.targetX, self.targetY, self.targetSize, self.detection)
 		finally:
 			self.imageLock.release()
 
 	def ReceiveNavdata(self,navdata):
-		# Indicate that new data has been received (thus we are connected)
-		self.communicationSinceTimer = True
-
 		# Update the message to be displayed
 		msg = self.StatusMessages[navdata.state] if navdata.state in self.StatusMessages else self.UnknownMessage
-		self.statusMessage = '{} (Battery: {}%)'.format(msg,int(navdata.batteryPercent))
+		self.statusMessage = 'Connected:{}||{}||Battery:{}%||AutoTracking:{}'.format(self.connected,msg,int(navdata.batteryPercent),self.auto)
 
 		self.tagLock.acquire()
 		try:
@@ -220,7 +227,7 @@ if __name__=='__main__':
 	import sys
 	rospy.init_node('Tracking')
 	app = QtGui.QApplication(sys.argv)
-	controller = BasicDroneController()
+	#controller = BasicDroneController()
 	display = VideoProcessing()
 	display.show()
 	status = app.exec_()

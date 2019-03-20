@@ -1,6 +1,6 @@
 <package>
-  <description brief="AR.Drone Tutorials">
-  	Controllers developed for the "Up and flying with the AR.Drone and ROS" tutorial series
+  <description brief="ardrone_color_tracking">
+  	Enable the drone to track an object of certain color
   </description>
   <author>Mike Hamer</author>
   <license>BSD</license>

@@ -1,0 +1,34 @@
+ROS Package Name: ardrone_color_tracking
+
+Package Description:
+    This package enables the drone to follow an object of certain color.
+    OpenCV is used to perform image processing, and basic control theory is applied to realize the auto-tracking.
+    Video demonstration of the drone and detailed documentation of the code will be added soon.
+
+How to use:
+Prerequisite: ROS Kinetic
+http://wiki.ros.org/kinetic
+    1. With a real drone (Parrot AR.drone):
+        a) Install ardrone_autonomy package
+            http://wiki.ros.org/ardrone_autonomy
+        b) Install this package
+            Clone this repository to your catkin workspace/src
+            In your catkin workspace, use command catkin_make
+        c) To launch, connect your wifi to Ardrone, and use following launch command in your terminal:
+            roslaunch ardrone_color_tracking keyboard_controller.launch
+
+    2. With Gazebo simulation:
+        a) Install modified tum_simulator
+            (Has not yet been published on Github, will update soon. Or you can modify the original test world)
+        b) launch roscore and the simulator in different terminals
+            roscore
+            roslaunch cvg_sim_gazebo ardrone_testword.launch
+        c) In another terminal, run keyboard_controller.py
+            rosrun ardrone_color_tracking keyboard_controller.py
+
+Update:
+Mar/19/2019 Color-Tracking works well in simulation.
+
+Acknowledgement:
+This package is an extension of ardrone_tutorial package (https://github.com/mikehamer/ardrone_tutorials).
+The ardrone_tutorial package provided a frame work for keyboard control and GUI of the drone.

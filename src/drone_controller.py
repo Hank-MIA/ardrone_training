@@ -15,14 +15,16 @@ import rospy
 from geometry_msgs.msg import Twist  	 # for sending commands to the drone
 from std_msgs.msg import Empty       	 # for land/takeoff/emergency
 from ardrone_autonomy.msg import Navdata # for receiving navdata feedback
-from diy_pid.msg import TargetCoord
+from ardrone_color_tracking.msg import TargetCoord
+from ardrone_color_tracking.msg import ColorHSV
+from ardrone_color_tracking.msg import TrainingData
 
 # An enumeration of Drone Statuses
 from drone_status import DroneStatus
 
 
 # Some Constants
-COMMAND_PERIOD = 0.001 # seconds
+COMMAND_PERIOD = 0.002 # seconds
 
 
 class BasicDroneController(object):
@@ -44,13 +46,27 @@ class BasicDroneController(object):
 		# Allow VideoProcessing to publish target coordinate data
 		self.pubTargetCoord = rospy.Publisher('/target/coord',TargetCoord,queue_size=1)
 
+		# Allow VideoProcessing to publish hsv color information
+		self.pubColor = rospy.Publisher('/color',ColorHSV,queue_size=1)
+
+		# To publish target coordinate and /cmd_vel, for data recording purpose
+		self.pubTrainingData = rospy.Publisher('/training/data',TrainingData,queue_size=1)
+
 		# Setup regular publishing of control packets
 		self.command = Twist()
 		self.commandTimer = rospy.Timer(rospy.Duration(COMMAND_PERIOD),self.SendCommand)
+
+		# Setup regular publishing of training data
+		self.training_data = TrainingData()
+		self.commandTimer = rospy.Timer(rospy.Duration(0.025),self.SendTrainingData)
 		
 		# Setup regular publishing of target coordinate
 		self.coord = TargetCoord()
 		self.coordTimer = rospy.Timer(rospy.Duration(COMMAND_PERIOD),self.SendCoord)
+
+		# Setup regular publishing of color information
+		self.color = ColorHSV()
+		self.colorTimer = rospy.Timer(rospy.Duration(COMMAND_PERIOD),self.SendColor)
 
 		# Land the drone if we are shutting down
 		rospy.on_shutdown(self.SendLand)
@@ -86,14 +102,38 @@ class BasicDroneController(object):
 		if self.status == DroneStatus.Flying or self.status == DroneStatus.GotoHover or self.status == DroneStatus.Hovering:
 			self.pubCommand.publish(self.command)
 
-	def SetCoord(self,x=0,y=0,z=0):
+	def SetCoord(self,x=0,y=0,size=0,detection=False):
 		# Called by VideoProcessing to set the target coordinate
 		self.coord.x = x
 		self.coord.y = y
-		self.coord.z = z
+		self.coord.size = size
+		self.coord.detected = detection
+
+	def SetColor(self,h=0,s=0,v=0):
+		# Called by VideoProcessing to identify color
+		self.color.h = h
+		self.color.s = s
+		self.color.v = v
 
 	def SendCoord(self,event):
 		# The previously set coordinate is then sent out periodically if the drone is flying
 		if self.status == DroneStatus.Flying or self.status == DroneStatus.GotoHover or self.status == DroneStatus.Hovering:
 			self.pubTargetCoord.publish(self.coord)
+			
+	def SendColor(self,event):
+		# The previously captured color is then sent out preriodically regardless of drones status
+		if self.status == DroneStatus.Flying or self.status == DroneStatus.GotoHover or self.status == DroneStatus.Hovering:
+			self.pubColor.publish(self.color)
 
+	def SetTrainingData(self,x=0,y=0,size=0,detection=False,roll=0,pitch=0,yaw_velocity=0,z_velocity=0):
+		self.training_data.x = x
+		self.training_data.y = y
+		self.training_data.size = size
+		self.training_data.roll = roll
+		self.training_data.pitch = pitch
+		self.training_data.yaw_velocity = yaw_velocity
+		self.training_data.z_velocity = z_velocity
+
+	def SendTrainingData(self,event):
+		if self.status == DroneStatus.Flying or self.status == DroneStatus.GotoHover or self.status == DroneStatus.Hovering:
+			self.pubTrainingData.publish(self.training_data)
