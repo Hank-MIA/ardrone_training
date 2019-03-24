@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8)
-project(ardrone_color_tracking)
+project(ardrone_training)
 
 find_package(catkin REQUIRED COMPONENTS
   message_generation

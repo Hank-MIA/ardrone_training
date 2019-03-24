@@ -45,6 +45,11 @@ class KeyboardController(VideoProcessing):
 		self.z_velocity = 0
 		self.auto = False
 
+		# For integration
+		self.integralDistanceX = 0
+		self.integralDistanceZ = 0
+
+		# For derivative
 		self.lastTargetX = 0
 		self.lastTargetY = 0
 		self.lastTargetSize = 0
@@ -54,14 +59,16 @@ class KeyboardController(VideoProcessing):
 	# Proportional (and derivative) control to track the target
 	def autoTracking(self,targetCoord):
 		if self.auto and self.connected and self.detection:
-			self.roll = (self.centerx - self.targetX)/200.0 #+ (self.targetX - self.lastTargetX)/200.0
+			self.roll = (self.centerx - self.targetX)/200.0 + self.integralDistanceX/100000 + (self.targetX - self.lastTargetX)/200.0
+			self.integralDistanceX += self.centerx - self.targetX
 			self.lastTargetX = copy.deepcopy(self.targetX)
 
-			self.z_velocity = (self.centery - self.targetY)/200.0 #+ (self.lastTargetY - self.targetY)/100.0
+			self.z_velocity = (self.centery - self.targetY)/200.0 + self.integralDistanceZ/100000 + (self.lastTargetY - self.targetY)/200.0
+			self.integralDistanceZ += self.centery - self.targetY
 			self.lastTargetY = copy.deepcopy(self.targetX)
 
-			self.pitch = (1000 - self.targetSize)/1000.0 #- (self.lastTargetSize - self.targetSize)/100.0
-			self.lastTargetSize = copy.deepcopy(self.targetSize)
+			#self.pitch = (1000 - self.targetSize)/1000.0 #- (self.lastTargetSize - self.targetSize)/100.0
+			#self.lastTargetSize = copy.deepcopy(self.targetSize)
 
 			self.controller.SetCommand(self.roll, self.pitch, self.yaw_velocity, self.z_velocity)
 		elif self.auto and self.connected and not self.detection:
