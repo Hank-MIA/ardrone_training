@@ -32,3 +32,5 @@ Mar/19/2019 Color-Tracking works well in simulation.
 Acknowledgement:
 This package is an extension of ardrone_tutorial package (https://github.com/mikehamer/ardrone_tutorials).
 The ardrone_tutorial package provided a frame work for keyboard control and GUI of the drone.
+
+This repo is no longer being maintained.
